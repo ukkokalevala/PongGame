@@ -1,0 +1,141 @@
+#include <WiFi.h>
+#include <esp_now.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// OLED display configuration
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// OLED I2C pins for ESP32-C3
+#define SDA_PIN 7
+#define SCL_PIN 6
+
+// ESP-NOW variables
+struct PaddleData {
+  int position;
+};
+PaddleData paddleData[2];
+
+// Game variables
+int ballX = 64, ballY = 32;
+int ballDirX = 1, ballDirY = 1;
+int paddle1Y = 0, paddle2Y = 0;
+int paddleHeight = 16, paddleWidth = 4;
+int ballSpeed = 1;
+int score[2] = {0, 0};
+
+void setup() {
+  Serial.begin(115200);
+
+  // Initialize OLED
+  Wire.begin(SDA_PIN, SCL_PIN); // Set OLED I2C pins explicitly
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED initialization failed");
+    while (true);
+  }
+  display.clearDisplay();
+  display.display();
+
+  // Initialize ESP-NOW
+  WiFi.mode(WIFI_STA);
+  Serial.print("ESP32-C3 MAC Address: ");
+  Serial.println(WiFi.macAddress());
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW initialization failed");
+    return;
+  }
+
+  esp_now_register_recv_cb(onDataReceive);
+}
+
+void loop() {
+  // Update game state
+  updateGame();
+
+  // Render game state
+  renderGame();
+
+  delay(30);
+}
+
+void onDataReceive(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  // Identify which player sent the data
+  for (int i = 0; i < 2; i++) {
+    if (memcmp(info->src_addr, getPlayerAddress(i), 6) == 0) {
+      memcpy(&paddleData[i], data, sizeof(PaddleData));
+      break;
+    }
+  }
+}
+
+void updateGame() {
+  // Update paddle positions
+  paddle1Y = map(paddleData[0].position, 0, 1023, 0, SCREEN_HEIGHT - paddleHeight);
+  paddle2Y = map(paddleData[1].position, 0, 1023, 0, SCREEN_HEIGHT - paddleHeight);
+
+  // Update ball position
+  ballX += ballDirX * ballSpeed;
+  ballY += ballDirY * ballSpeed;
+
+  // Ball collision with top and bottom
+  if (ballY <= 0 || ballY >= SCREEN_HEIGHT) {
+    ballDirY *= -1;
+  }
+
+  // Ball collision with paddles
+  if (ballX <= paddleWidth && ballY >= paddle1Y && ballY <= paddle1Y + paddleHeight) {
+    ballDirX *= -1;
+  }
+  if (ballX >= SCREEN_WIDTH - paddleWidth && ballY >= paddle2Y && ballY <= paddle2Y + paddleHeight) {
+    ballDirX *= -1;
+  }
+
+  // Ball out of bounds
+  if (ballX <= 0) {
+    score[1]++;
+    resetBall();
+  }
+  if (ballX >= SCREEN_WIDTH) {
+    score[0]++;
+    resetBall();
+  }
+}
+
+void renderGame() {
+  display.clearDisplay();
+
+  // Draw paddles
+  display.fillRect(0, paddle1Y, paddleWidth, paddleHeight, SSD1306_WHITE);
+  display.fillRect(SCREEN_WIDTH - paddleWidth, paddle2Y, paddleWidth, paddleHeight, SSD1306_WHITE);
+
+  // Draw ball
+  display.fillRect(ballX, ballY, 2, 2, SSD1306_WHITE);
+
+  // Draw score
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(30, 0);
+  display.printf("%d", score[0]);
+  display.setCursor(90, 0);
+  display.printf("%d", score[1]);
+
+  display.display();
+}
+
+void resetBall() {
+  ballX = SCREEN_WIDTH / 2;
+  ballY = SCREEN_HEIGHT / 2;
+  ballDirX *= -1;
+}
+
+uint8_t* getPlayerAddress(int player) {
+  static uint8_t playerAddresses[2][6] = {
+    {0x, 0x, 0x, 0x, 0x, 0x}, // Player 1 MAC use your mac address.
+    {0x, 0x, 0x, 0x, 0x, 0x}  // Player 2 MAC use your mac address.
+  };
+  return playerAddresses[player];
+}
