@@ -1,0 +1,45 @@
+#include <ESP8266WiFi.h>
+#include <espnow.h> // For ESP8266, use espnow.h
+
+// ESP-NOW structure
+struct PaddleData {
+  int position;
+};
+PaddleData paddleData;
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+
+  // Initialize ESP-NOW
+  if (esp_now_init() != 0) { // ESP8266 uses 0 for success
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Set the receiver MAC address (ESP32-C3 MAC address)
+  uint8_t receiverAddress[] = {0x, 0x, 0x, 0x, 0x, 0x}; // Replace with YOUR ESP32-C3 MAC ADDRESS
+
+  // Add peer information
+  if (esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER) != 0) {
+    Serial.println("Error setting self role");
+    return;
+  }
+
+  if (esp_now_add_peer(receiverAddress, ESP_NOW_ROLE_SLAVE, 0, NULL, 0) != 0) {
+    Serial.println("Failed to add peer");
+    return;
+  }
+}
+
+void loop() {
+  // Read potentiometer value
+  paddleData.position = analogRead(A0); // Adjust if using a different pin
+
+  // Send data to ESP32-C3
+  if (esp_now_send(NULL, (uint8_t *)&paddleData, sizeof(PaddleData)) != 0) {
+    Serial.println("Error sending data");
+  }
+
+  delay(50); // Adjust for update frequency
+}
